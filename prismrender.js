@@ -12,21 +12,26 @@ let browser; // Reuse a single browser instance
 let browserRestartInterval = -1; // Restart browser after 10 prerender requests
 let prerenderCount = 0;
 let isRestarting = false; // Add a flag to indicate if the browser is restarting
+let cleanupRunning = false; // Flag to prevent concurrent cleanup
 
 async function launchBrowser() {
     if (!browser && !isRestarting) {
         isRestarting = true; // Set the flag to true before launching
         try {
+            console.log('Launching browser...');
             browser = await puppeteer.launch({
                 headless: 'new',
                 args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
                 protocolTimeout: 240000, // Increase protocol timeout to 4 minutes
             });
+            console.log('Browser launched successfully.');
         } catch (error) {
             console.error('Error launching browser:', error);
             if (error.message.includes('Network.enable timed out')) {
                 console.log('ProtocolError: Network.enable timed out. Restarting browser...');
-                await closeBrowser(); // Close the browser if it exists
+                if (browser) { // Check if browser exists before closing
+                    await closeBrowser(); // Close the browser if it exists
+                }
                 browser = null; // Set browser to null
             }
         } finally {
@@ -83,7 +88,7 @@ async function prerender(targetUrl) {
 
             // Set a timeout for Puppeteer's goto method
             const startTime = Date.now(); // Record start time
-            await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 60000 }); // 1 minute timeout
+            await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 120000 }); // 2 minute timeout
             let html = await page.content();
             const endTime = Date.now(); // Record end time
             const prerenderTime = endTime - startTime; // Calculate prerender time
@@ -154,6 +159,12 @@ async function closeBrowser() {
 
 // Function to clean up zombie processes using Node.js process management
 async function cleanupZombieProcesses() {
+    if (cleanupRunning) {
+        console.log('Cleanup already running, skipping...');
+        return;
+    }
+
+    cleanupRunning = true;
     try {
         console.log('Cleaning up zombie processes...');
         const child = spawn('ps', ['-eo', 'pid,s,comm']); // Include state (s) in the output
@@ -182,9 +193,11 @@ async function cleanupZombieProcesses() {
                     }
                 }
             });
+            cleanupRunning = false;
         });
     } catch (error) {
         console.error('Error cleaning up zombie processes:', error);
+        cleanupRunning = false;
     }
 }
 
