@@ -2,7 +2,7 @@ const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const puppeteer = require('puppeteer');
 const urlModule = require('url');
-// const { spawn } = require('child_process'); // Remove spawn import
+const { spawn } = require('child_process'); // Import spawn to handle zombie processes
 
 const app = express();
 const port = 3000;
@@ -20,8 +20,15 @@ async function launchBrowser() {
             browser = await puppeteer.launch({
                 headless: 'new',
                 args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
-                protocolTimeout: 120000, // Increase protocol timeout to 2 minutes
+                protocolTimeout: 240000, // Increase protocol timeout to 4 minutes
             });
+        } catch (error) {
+            console.error('Error launching browser:', error);
+            if (error.message.includes('Network.enable timed out')) {
+                console.log('ProtocolError: Network.enable timed out. Restarting browser...');
+                await closeBrowser(); // Close the browser if it exists
+                browser = null; // Set browser to null
+            }
         } finally {
             isRestarting = false; // Reset the flag after launching (or failing to launch)
         }
@@ -116,9 +123,52 @@ async function closeBrowser() {
             console.error('Error closing browser:', error);
         } finally {
             browser = null; // Ensure browser is nullified after closing
+            await cleanupZombieProcesses(); // Clean up zombie processes after closing
         }
     }
 }
+
+// Function to clean up zombie processes using Node.js process management
+async function cleanupZombieProcesses() {
+    try {
+        console.log('Cleaning up zombie processes...');
+        const child = spawn('ps', ['-eo', 'pid,s,comm']); // Include state (s) in the output
+        let output = '';
+
+        child.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+
+        child.on('close', () => {
+            const lines = output.split('\n');
+            const zombieProcesses = lines.filter((line) => line.includes(' Z ') && line.includes('chrome')); // Look for ' Z ' state
+            zombieProcesses.forEach((line) => {
+                const parts = line.trim().split(/\s+/); // Split by any number of spaces
+                const pid = parts[0];
+                const state = parts[1];
+                const command = parts.slice(2).join(' ');
+
+                if (pid && state === 'Z') {
+                    try {
+                        console.log(`Attempting to kill zombie process with PID: ${pid}, Command: ${command}`);
+                        process.kill(pid, 'SIGKILL'); // Kill the zombie process
+                        console.log(`Killed zombie process with PID: ${pid}, Command: ${command}`);
+                    } catch (error) {
+                        console.error(`Failed to kill zombie process with PID: ${pid}, Command: ${command}`, error);
+                    }
+                }
+            });
+        });
+    } catch (error) {
+        console.error('Error cleaning up zombie processes:', error);
+    }
+}
+
+// Periodic cleanup of zombie processes
+setInterval(async () => {
+    console.log('Running periodic cleanup of zombie processes...');
+    await cleanupZombieProcesses();
+}, 60000); // Run cleanup every 60 seconds
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
