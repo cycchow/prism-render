@@ -114,17 +114,41 @@ async function closeBrowser() {
         try {
             console.log('Closing browser...');
             const browserProcess = browser.process();
-            await browser.close(); // Close the browser instance
+
+            // Add a timeout to browser.close()
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('browser.close() timeout')), 30000) // 30 seconds timeout
+                ),
+            ]);
+
+            console.log('Browser closed successfully.'); // Log success
+
             if (browserProcess) {
                 console.log('Killing browser process...');
                 browserProcess.kill('SIGKILL'); // Kill the browser process explicitly
+                console.log('Browser process killed.'); // Log success
             }
         } catch (error) {
             console.error('Error closing browser:', error);
+            // If browser.close() timed out, ensure the process is killed
+            if (browser && browser.process()) {
+                try {
+                    console.log('Attempting to kill browser process due to timeout...');
+                    browser.process().kill('SIGKILL');
+                    console.log('Browser process killed after timeout.');
+                } catch (killError) {
+                    console.error('Error killing browser process after timeout:', killError);
+                }
+            }
         } finally {
             browser = null; // Ensure browser is nullified after closing
+            console.log('Browser set to null.'); // Log nullification
             await cleanupZombieProcesses(); // Clean up zombie processes after closing
         }
+    } else {
+        console.log('Browser is already null, no need to close.');
     }
 }
 
