@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prism-render
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prism-render
+  template:
+    metadata:
+      labels:
+        app: prism-render
+    spec:
+      containers:
+      - name: prism-render
+        image: your-image-name:latest
+        ports:
+        - containerPort: 3000
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        env:
+        - name: NODE_ENV
+          value: "production"
+        readinessProbe:
+          httpGet:
+            path: /render
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /render
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 10
