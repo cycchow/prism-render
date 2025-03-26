@@ -9,7 +9,7 @@ const port = 3000;
 const angularAppPort = 4200;
 
 let browser; // Reuse a single browser instance
-let browserRestartInterval = -1; // Restart browser after 10 prerender requests
+let browserRestartInterval = 60; // Restart browser every 60 requests
 let prerenderCount = 0;
 let isRestarting = false; // Add a flag to indicate if the browser is restarting
 let cleanupRunning = false; // Flag to prevent concurrent cleanup
@@ -21,7 +21,13 @@ async function launchBrowser() {
             console.log('Launching browser...');
             browser = await puppeteer.launch({
                 headless: 'new',
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-gpu',
+                    '--disable-dev-shm-usage', // Prevent Chrome from running out of memory
+                    '--single-process', // Run Chrome in single-process mode
+                ],
                 protocolTimeout: 240000, // Increase protocol timeout to 4 minutes
             });
             console.log('Browser launched successfully.');
@@ -41,7 +47,7 @@ async function launchBrowser() {
     return browser;
 }
 
-async function prerender(targetUrl) {
+async function prerender(targetUrl, retryCount = 0) {
     try {
         // Restart the browser if the count exceeds the interval
         if (browserRestartInterval !== -1 && prerenderCount >= browserRestartInterval) {
@@ -109,7 +115,14 @@ async function prerender(targetUrl) {
         }
     } catch (error) {
         console.error(`Error prerendering ${targetUrl}:`, error);
-        return null;
+        if (retryCount < 3) {
+            console.log(`Retrying prerender ${targetUrl} (attempt ${retryCount + 1})...`);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retrying
+            return prerender(targetUrl, retryCount + 1); // Retry the prerender
+        } else {
+            console.error(`Max retries reached for ${targetUrl}.`);
+            return null;
+        }
     }
 }
 
