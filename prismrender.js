@@ -70,9 +70,17 @@ async function prerender(targetUrl, retryCount = 0) {
 
         browser = await launchBrowser();
 
-        if (!browser) { // Check if browser is null after launch
-            console.log('Browser launch failed, skipping prerender');
-            return null; // Skip prerendering if browser launch failed
+        // Check if browser is still connected before using it
+        if (!browser || !browser.isConnected()) {
+            console.log('Browser is not connected or launch failed, attempting to relaunch...');
+            if (browser) {
+                await closeBrowser();
+            }
+            browser = await launchBrowser();
+            if (!browser || !browser.isConnected()) {
+                console.log('Browser relaunch failed, skipping prerender');
+                return null;
+            }
         }
 
         const page = await browser.newPage();
