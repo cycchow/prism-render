@@ -86,11 +86,22 @@ async function prerender(targetUrl, userAgent = 'Mozilla/5.0', clientIp = '', re
         const page = await browser.newPage();
 
         try {
-            // Set user agent for accurate GA4 tracking
-            await page.setUserAgent(userAgent);
+            // Set user agent for accurate GA4 tracking (coerce to string to avoid protocol errors)
+            const safeUserAgent = (typeof userAgent === 'string' && userAgent.trim() !== '') ? userAgent : 'Mozilla/5.0';
+            try {
+                await page.setUserAgent(String(safeUserAgent));
+            } catch (uaError) {
+                console.error('Failed to set user agent, proceeding with default UA:', uaError);
+                await page.setUserAgent('Mozilla/5.0');
+            }
+
             // Optionally, set client IP as a header (if your GA4 code can read it)
             if (clientIp) {
-                await page.setExtraHTTPHeaders({ 'X-Forwarded-For': clientIp });
+                try {
+                    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': String(clientIp) });
+                } catch (hdrError) {
+                    console.error('Failed to set extra HTTP header X-Forwarded-For:', hdrError);
+                }
             }
 
             // Enable caching
@@ -133,7 +144,8 @@ async function prerender(targetUrl, userAgent = 'Mozilla/5.0', clientIp = '', re
         if (retryCount < 3) {
             console.log(`Retrying prerender ${targetUrl} (attempt ${retryCount + 1})...`);
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retrying
-            return prerender(targetUrl, retryCount + 1); // Retry the prerender
+            // Pass userAgent and clientIp through on retries to avoid invalid parameter types
+            return prerender(targetUrl, userAgent, clientIp, retryCount + 1); // Retry the prerender
         } else {
             console.error(`Max retries reached for ${targetUrl}.`);
             return null;
