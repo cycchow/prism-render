@@ -47,7 +47,7 @@ async function launchBrowser() {
     return browser;
 }
 
-async function prerender(targetUrl, retryCount = 0) {
+async function prerender(targetUrl, userAgent = 'Mozilla/5.0', clientIp = '', retryCount = 0) {
     try {
         // Restart the browser if the count exceeds the interval
         if (browserRestartInterval !== -1 && prerenderCount >= browserRestartInterval) {
@@ -86,6 +86,13 @@ async function prerender(targetUrl, retryCount = 0) {
         const page = await browser.newPage();
 
         try {
+            // Set user agent for accurate GA4 tracking
+            await page.setUserAgent(userAgent);
+            // Optionally, set client IP as a header (if your GA4 code can read it)
+            if (clientIp) {
+                await page.setExtraHTTPHeaders({ 'X-Forwarded-For': clientIp });
+            }
+
             // Enable caching
             await page.setCacheEnabled(true);
 
@@ -112,8 +119,8 @@ async function prerender(targetUrl, retryCount = 0) {
             // Derive the base URL from the target URL
             const { protocol, host } = new urlModule.URL(targetUrl);
             const baseUrl = `${protocol}//${host}`;
-            html = html.replace(/(href|src)="\/([^"]*)"/g, `$1="${baseUrl}/$2"`);
-            html = html.replace(/(href|src)="http:\/\/localhost:\d+\/([^"]*)"/g, `$1="${baseUrl}/$2"`);
+            html = html.replace(/(href|src)="\/([^\"]*)"/g, `$1="${baseUrl}/$2"`);
+            html = html.replace(/(href|src)="http:\/\/localhost:\d+\/([^\"]*)"/g, `$1="${baseUrl}/$2"`);
 
             prerenderCount++; // Increment the prerender count
             return html;
@@ -237,6 +244,8 @@ app.get('/render', async (req, res) => {
     console.log('Received request for prerendering:', req.query.url);
 
     const requestedUrl = req.query.url;
+    const userAgent = req.headers['user-agent'] || 'Mozilla/5.0';
+    const clientIp = req.headers['x-forwarded-for'] || req.ip;
 
     if (!requestedUrl) {
         console.log('Missing URL parameter');
@@ -247,7 +256,7 @@ app.get('/render', async (req, res) => {
         const parsedUrl = new urlModule.URL(requestedUrl);
         console.log('Parsed URL:', parsedUrl.href);
 
-        const prerenderedHtml = await prerender(requestedUrl);
+        const prerenderedHtml = await prerender(requestedUrl, userAgent, clientIp);
 
         if (prerenderedHtml) {
             console.log('Prerendering successful');
