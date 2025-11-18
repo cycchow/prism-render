@@ -5,7 +5,7 @@ const urlModule = require('url');
 const { spawn } = require('child_process'); // Import spawn to handle zombie processes
 
 const app = express();
-const port = 3000;
+const port = 3200;
 const angularAppPort = 4200;
 
 let browser; // Reuse a single browser instance
@@ -20,7 +20,8 @@ async function launchBrowser() {
         try {
             console.log('Launching browser...');
             browser = await puppeteer.launch({
-                headless: 'new',
+                // headless: 'new',
+                headless: false,
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -49,6 +50,9 @@ async function launchBrowser() {
 
 async function prerender(targetUrl, retryCount = 0) {
     try {
+        // Determine whether to rewrite URLs internally (for in-cluster rendering)
+        const isInternal = process.env.PRERENDER_INTERNAL === "true";
+
         // Restart the browser if the count exceeds the interval
         if (browserRestartInterval !== -1 && prerenderCount >= browserRestartInterval) {
             console.log('Restarting browser to free up resources...');
@@ -84,25 +88,82 @@ async function prerender(targetUrl, retryCount = 0) {
         }
 
         const page = await browser.newPage();
-
+        page.userAgent = 'prerender'
         try {
             // Enable caching
             await page.setCacheEnabled(true);
 
-            // Block unnecessary resources
+            // --- ENABLE request interception and use custom handler ---
             await page.setRequestInterception(true);
             page.on('request', (req) => {
+                const url = req.url();
                 const resourceType = req.resourceType();
-                if (['image', 'stylesheet', 'font'].includes(resourceType)) {
-                    req.abort();
-                } else {
-                    req.continue();
+
+                // --- (1) BLOCK ALL GA / GTM / ANALYTICS ---
+                if (
+                    url.includes('googletagmanager.com') ||
+                    url.includes('google-analytics.com') ||
+                    url.includes('analytics.google.com') ||
+                    url.includes('gtag/js') ||
+                    url.includes('collect?v=') ||
+                    url.includes('stats.g.doubleclick.net')
+                ) {
+                    return req.abort();
                 }
+
+                // --- (2) REWRITE FRONTEND DOMAIN TO INTERNAL K8S SERVICE ---
+                if (url.startsWith("https://www.ma288.com") || url.startsWith("https://ma288.com")) {
+                    const internalUrl = url
+                        .replace("https://www.ma288.com", isInternal?"http://ma288-nginx.ma288-production.svc.cluster.local":"https://www.ma288.com")
+                        .replace("https://ma288.com", isInternal?"http://ma288-nginx.ma288-production.svc.cluster.local":"https://ma288.com")
+
+                        ;
+
+                        return req.continue({ url: internalUrl });
+                }
+
+                // --- (3) REWRITE API DOMAIN TO INTERNAL K8S SERVICE ---
+                if (url.startsWith("https://api.ma288.com")) {
+                    const internalApiUrl = url
+                        .replace("https://api.ma288.com",isInternal?"http://api-nginx.ma288-production.svc.cluster.local":"https://api.ma288.com")
+                    ;
+                    return req.continue({ url: internalApiUrl });
+                }
+
+                // BLOCK USELESS RESOURCES (KEEP JS ALLOWED)
+                if (resourceType === "script") {
+                    return req.continue(); // ALWAYS allow JS bundles (critical for Angular)
+                }
+
+                if (["image", "font"].includes(resourceType)) {
+                    return req.abort();
+                }
+
+                req.continue();
             });
 
             // Set a timeout for Puppeteer's goto method
             const startTime = Date.now(); // Record start time
-            await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 120000 }); // 2 minute timeout
+            
+            // Rewrite main navigation URL only when running inside cluster
+            let gotoUrl = targetUrl;
+            if (isInternal) {
+                gotoUrl = gotoUrl
+                    .replace("https://www.ma288.com", "http://ma288-nginx.ma288-production.svc.cluster.local")
+                    .replace("https://ma288.com", "http://ma288-nginx.ma288-production.svc.cluster.local");
+            }
+
+            await page.goto(gotoUrl, {
+                waitUntil: 'networkidle2',
+                timeout: 120000
+            });
+            
+            // Wait until Angular has rendered something meaningful
+            await page.waitForFunction(
+                () => document.querySelector('app-root') && document.querySelector('app-root').innerText.trim().length > 0,
+                { timeout: 60000 }
+            );
+
             let html = await page.content();
             const endTime = Date.now(); // Record end time
             const prerenderTime = endTime - startTime; // Calculate prerender time
