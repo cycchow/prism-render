@@ -107,20 +107,43 @@ async function prerender(targetUrl, userAgent = 'Mozilla/5.0', clientIp = '', re
             // Enable caching
             await page.setCacheEnabled(true);
 
-            // Block unnecessary resources
+            // Block unnecessary resources and third-party analytics
             await page.setRequestInterception(true);
             page.on('request', (req) => {
+                const url = req.url();
+
+                // Block analytics, GTM, Facebook Pixel, TikTok, Hotjar
+                if (
+                    url.includes('googletagmanager.com') ||
+                    url.includes('google-analytics.com') ||
+                    url.includes('analytics.google.com') ||
+                    url.includes('gtag/js') ||
+                    url.includes('connect.facebook.net') ||
+                    url.includes('analytics.tiktok.com') ||
+                    url.includes('static.hotjar.com')
+                ) {
+                    return req.abort();
+                }
+
                 const resourceType = req.resourceType();
                 if (['image', 'stylesheet', 'font'].includes(resourceType)) {
-                    req.abort();
-                } else {
-                    req.continue();
+                    return req.abort();
                 }
+
+                req.continue();
             });
 
             // Set a timeout for Puppeteer's goto method
             const startTime = Date.now(); // Record start time
-            await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 120000 }); // 2 minute timeout
+
+            // Rewrite HTTPS public domain → internal K8s HTTP service
+            let internalUrl = targetUrl
+                .replace('https://www.ma288.com', 'http://ma288-nginx.ma288-production.svc.cluster.local')
+                .replace('https://ma288.com', 'http://ma288-nginx.ma288-production.svc.cluster.local');
+
+            // Load internal K8s URL (avoid Cloudflare + ingress)
+            await page.goto(internalUrl, { waitUntil: 'networkidle0', timeout: 120000 });
+
             let html = await page.content();
             const endTime = Date.now(); // Record end time
             const prerenderTime = endTime - startTime; // Calculate prerender time
