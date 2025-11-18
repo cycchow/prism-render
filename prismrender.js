@@ -5,8 +5,9 @@ const urlModule = require('url');
 const { spawn } = require('child_process'); // Import spawn to handle zombie processes
 
 const app = express();
-const port = 3200;
+const port = process.env.SERVER_PORT || 3000;
 const angularAppPort = 4200;
+const isInternal = process.env.PRERENDER_INTERNAL === "true";
 
 let browser; // Reuse a single browser instance
 let browserRestartInterval = 60; // Restart browser every 60 requests
@@ -51,7 +52,7 @@ async function launchBrowser() {
 async function prerender(targetUrl, retryCount = 0) {
     try {
         // Determine whether to rewrite URLs internally (for in-cluster rendering)
-        const isInternal = process.env.PRERENDER_INTERNAL === "true";
+
 
         // Restart the browser if the count exceeds the interval
         if (browserRestartInterval !== -1 && prerenderCount >= browserRestartInterval) {
