@@ -157,6 +157,36 @@ async function withPage(task) {
     await page.setDefaultTimeout(RENDER_READY_TIMEOUT_MS);
     await page.setRequestInterception(true);
 
+    page.on('console', (message) => {
+        const type = message.type().toUpperCase();
+        const text = message.text();
+        console.log(`[browser:${type}] ${text}`);
+    });
+
+    page.on('pageerror', (error) => {
+        console.error('[browser:PAGEERROR]', error);
+    });
+
+    page.on('requestfailed', (request) => {
+        const failure = request.failure();
+        console.error(
+            `[browser:REQUESTFAILED] ${request.method()} ${request.url()} ${failure ? failure.errorText : 'unknown error'}`
+        );
+    });
+
+    page.on('response', async (response) => {
+        if (response.status() < 400) {
+            return;
+        }
+
+        const request = response.request();
+        if (!request.url().includes('ma288.com')) {
+            return;
+        }
+
+        console.error(`[browser:HTTP${response.status()}] ${request.method()} ${request.url()}`);
+    });
+
     page.on('request', (req) => {
         const requestUrl = req.url();
         const resourceType = req.resourceType();
