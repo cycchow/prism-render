@@ -13,8 +13,10 @@ const RENDER_CACHE_TTL_SECONDS = Number(process.env.RENDER_CACHE_TTL_SECONDS || 
 const MAX_CONCURRENT_RENDERS = Number(process.env.MAX_CONCURRENT_RENDERS || 2);
 const BROWSER_RESTART_INTERVAL = Number(process.env.BROWSER_RESTART_INTERVAL || 200);
 const MAX_RENDER_RETRIES = Number(process.env.MAX_RENDER_RETRIES || 2);
-const NAVIGATION_TIMEOUT_MS = Number(process.env.NAVIGATION_TIMEOUT_MS || 45000);
-const RENDER_READY_TIMEOUT_MS = Number(process.env.RENDER_READY_TIMEOUT_MS || 15000);
+const NAVIGATION_TIMEOUT_MS = Number(process.env.NAVIGATION_TIMEOUT_MS || 60000);
+const RENDER_READY_TIMEOUT_MS = Number(process.env.RENDER_READY_TIMEOUT_MS || 30000);
+const RENDER_SETTLE_DELAY_MS = Number(process.env.RENDER_SETTLE_DELAY_MS || 2000);
+const MIN_RENDERED_TEXT_LENGTH = Number(process.env.MIN_RENDERED_TEXT_LENGTH || 120);
 
 const htmlCache = new NodeCache({
     stdTTL: RENDER_CACHE_TTL_SECONDS,
@@ -54,6 +56,20 @@ function normalizeHtml(targetUrl, html) {
     return html
         .replace(/(href|src)="\/([^"]*)"/g, `$1="${baseUrl}/$2"`)
         .replace(/(href|src)="http:\/\/localhost:\d+\/([^"]*)"/g, `$1="${baseUrl}/$2"`);
+}
+
+function isShellLikeHtml(html) {
+    const rootMatch = html.match(/<app-root[^>]*>([\s\S]*?)<\/app-root>/i);
+    const rootHtml = rootMatch ? rootMatch[1] : '';
+    const textOnly = rootHtml
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return textOnly.length < MIN_RENDERED_TEXT_LENGTH;
 }
 
 async function acquireRenderSlot() {
@@ -187,7 +203,7 @@ async function renderOnce(targetUrl) {
 
     const html = await withPage(async (page) => {
         await page.goto(gotoUrl, {
-            waitUntil: 'domcontentloaded',
+            waitUntil: 'networkidle2',
             timeout: NAVIGATION_TIMEOUT_MS,
         });
 
@@ -198,15 +214,22 @@ async function renderOnce(targetUrl) {
                     return false;
                 }
 
+                const title = document.title ? document.title.trim() : '';
+                const description = document.querySelector('meta[name="description"]')?.getAttribute('content')?.trim() || '';
                 const hasMeaningfulContent = root.innerText.trim().length > 0;
-                const hasSeoMarkers = document.querySelector('title') && document.querySelector('meta[name="description"]');
-                return hasMeaningfulContent || hasSeoMarkers;
+                return hasMeaningfulContent && title.length > 0 && description.length > 0;
             },
             { timeout: RENDER_READY_TIMEOUT_MS }
         );
 
+        await new Promise((resolve) => setTimeout(resolve, RENDER_SETTLE_DELAY_MS));
+
         return page.content();
     });
+
+    if (isShellLikeHtml(html)) {
+        throw new Error(`Rendered shell without sufficient content for ${targetUrl}`);
+    }
 
     prerenderCount += 1;
     console.log(`Prerendered ${targetUrl} in ${Date.now() - startTime}ms`);
