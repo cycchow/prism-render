@@ -1,9 +1,14 @@
 {
+  "version": "1.15.1",
+  "scripts": {
+    "start": "node prismrender.js",
+    "tagAndPush": "docker buildx build --platform=linux/amd64 --push -t gcp-cr.dllm.me/hkjc-racingdata/ma288-mobile:$npm_package_version . && git push origin :refs/tags/mobile-$npm_package_version && git tag -fa desktop-$npm_package_version -m \"for build desktop $npm_package_version\" && git push origin HEAD --tags"
+  },
   "dependencies": {
-    "cheerio": "^1.0.0",
-    "express": "^4.21.2",
-    "http-proxy-middleware": "^3.0.3",
+    "cheerio": "^1.2.0",
+    "express": "^5.2.1",
+    "http-proxy-middleware": "^3.0.5",
     "node-cache": "^5.1.2",
-    "puppeteer": "^24.4.0"
+    "puppeteer": "^24.40.0"
   }
 }

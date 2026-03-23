@@ -11,7 +11,7 @@ const generateCacheKey = (url) => {
     return crypto.createHash('md5').update(url).digest('hex');
 };
 
-app.get('*', async (req, res) => {
+app.get(/.*/, async (req, res) => {
     const url = req.query.url;
     if (!url) {
         return res.status(400).send('Missing ?url parameter');
@@ -56,4 +56,3 @@ app.get('*', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Prerender service running on port ${PORT}`));
-

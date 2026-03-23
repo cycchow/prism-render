@@ -2,8 +2,8 @@ module.exports = {
   apps : [{
     name   : "prism-render",
     script : "prismrender.js",
-    instances: "max",
-    exec_mode: "cluster",
+    instances: 1,
+    exec_mode: "fork",
     autorestart: true,
     watch: false,
     max_memory_restart: "1G",
@@ -18,9 +18,8 @@ module.exports = {
     ],
     pre_exit: async () => {
       console.log('PM2: Running pre-exit cleanup...');
-      const { closeBrowser, cleanupZombieProcesses } = require('./prismrender');
+      const { closeBrowser } = require('./prismrender');
       await closeBrowser();
-      await cleanupZombieProcesses();
       console.log('PM2: Pre-exit cleanup complete.');
     }
   }],
