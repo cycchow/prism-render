@@ -56,6 +56,44 @@ function normalizeHtml(targetUrl, html) {
         .replace(/(href|src)="http:\/\/localhost:\d+\/([^"]*)"/g, `$1="${baseUrl}/$2"`);
 }
 
+function buildReadyCheck(targetUrl) {
+    const pathname = new urlModule.URL(targetUrl).pathname;
+    const selectors = [];
+
+    if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/-999\/-999(?:\/\d{8})?$/.test(pathname)) {
+        selectors.push('div.panelHeader');
+    } else if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/-999\/\d{8}$/.test(pathname)) {
+        selectors.push('div.ma288promote');
+    } else if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/[^/]+\/\d{8}$/.test(pathname)) {
+        selectors.push('h1.horseName');
+    } else if (/^\/m\/(zh_hk|zh_cn|en)\/oversea-race$/.test(pathname)) {
+        selectors.push('ul.oversea-rating-list');
+    } else if (/^\/register\/(zh_hk|zh_cn|en)\/select-plan$/.test(pathname)) {
+        selectors.push('div.advanceMemberTitle');
+    }
+
+    return () => {
+        const root = document.querySelector('app-root');
+        if (!root) {
+            return false;
+        }
+
+        const rootText = root.innerText.replace(/\s+/g, ' ').trim();
+        if (!rootText) {
+            return false;
+        }
+
+        if (selectors.length === 0) {
+            return true;
+        }
+
+        return selectors.every((selector) => {
+            const element = document.querySelector(selector);
+            return element && element.textContent.replace(/\s+/g, ' ').trim().length > 0;
+        });
+    };
+}
+
 async function acquireRenderSlot() {
     if (activeRenders < MAX_CONCURRENT_RENDERS) {
         activeRenders += 1;
@@ -193,10 +231,7 @@ async function renderOnce(targetUrl) {
             timeout: NAVIGATION_TIMEOUT_MS,
         });
 
-        await page.waitForFunction(
-            () => document.querySelector('app-root') && document.querySelector('app-root').innerText.trim().length > 0,
-            { timeout: RENDER_READY_TIMEOUT_MS }
-        );
+        await page.waitForFunction(buildReadyCheck(targetUrl), { timeout: RENDER_READY_TIMEOUT_MS });
 
         return page.content();
     });
