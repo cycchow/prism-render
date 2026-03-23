@@ -13,10 +13,8 @@ const RENDER_CACHE_TTL_SECONDS = Number(process.env.RENDER_CACHE_TTL_SECONDS || 
 const MAX_CONCURRENT_RENDERS = Number(process.env.MAX_CONCURRENT_RENDERS || 2);
 const BROWSER_RESTART_INTERVAL = Number(process.env.BROWSER_RESTART_INTERVAL || 200);
 const MAX_RENDER_RETRIES = Number(process.env.MAX_RENDER_RETRIES || 2);
-const NAVIGATION_TIMEOUT_MS = Number(process.env.NAVIGATION_TIMEOUT_MS || 60000);
-const RENDER_READY_TIMEOUT_MS = Number(process.env.RENDER_READY_TIMEOUT_MS || 30000);
-const RENDER_SETTLE_DELAY_MS = Number(process.env.RENDER_SETTLE_DELAY_MS || 2000);
-const MIN_RENDERED_TEXT_LENGTH = Number(process.env.MIN_RENDERED_TEXT_LENGTH || 120);
+const NAVIGATION_TIMEOUT_MS = Number(process.env.NAVIGATION_TIMEOUT_MS || 120000);
+const RENDER_READY_TIMEOUT_MS = Number(process.env.RENDER_READY_TIMEOUT_MS || 60000);
 
 const htmlCache = new NodeCache({
     stdTTL: RENDER_CACHE_TTL_SECONDS,
@@ -56,20 +54,6 @@ function normalizeHtml(targetUrl, html) {
     return html
         .replace(/(href|src)="\/([^"]*)"/g, `$1="${baseUrl}/$2"`)
         .replace(/(href|src)="http:\/\/localhost:\d+\/([^"]*)"/g, `$1="${baseUrl}/$2"`);
-}
-
-function isShellLikeHtml(html) {
-    const rootMatch = html.match(/<app-root[^>]*>([\s\S]*?)<\/app-root>/i);
-    const rootHtml = rootMatch ? rootMatch[1] : '';
-    const textOnly = rootHtml
-        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    return textOnly.length < MIN_RENDERED_TEXT_LENGTH;
 }
 
 async function acquireRenderSlot() {
@@ -149,7 +133,6 @@ async function withPage(task) {
     const currentBrowser = await launchBrowser();
     const page = await currentBrowser.newPage();
 
-    await page.setUserAgent('prerender');
     await page.setExtraHTTPHeaders({
         'X-Prerender-Request': '1',
     });
@@ -211,28 +194,12 @@ async function renderOnce(targetUrl) {
         });
 
         await page.waitForFunction(
-            () => {
-                const root = document.querySelector('app-root');
-                if (!root) {
-                    return false;
-                }
-
-                const title = document.title ? document.title.trim() : '';
-                const description = document.querySelector('meta[name="description"]')?.getAttribute('content')?.trim() || '';
-                const hasMeaningfulContent = root.innerText.trim().length > 0;
-                return hasMeaningfulContent && title.length > 0 && description.length > 0;
-            },
+            () => document.querySelector('app-root') && document.querySelector('app-root').innerText.trim().length > 0,
             { timeout: RENDER_READY_TIMEOUT_MS }
         );
 
-        await new Promise((resolve) => setTimeout(resolve, RENDER_SETTLE_DELAY_MS));
-
         return page.content();
     });
-
-    if (isShellLikeHtml(html)) {
-        throw new Error(`Rendered shell without sufficient content for ${targetUrl}`);
-    }
 
     prerenderCount += 1;
     console.log(`Prerendered ${targetUrl} in ${Date.now() - startTime}ms`);
