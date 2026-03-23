@@ -152,9 +152,6 @@ async function withPage(task) {
     const currentBrowser = await launchBrowser();
     const page = await currentBrowser.newPage();
 
-    await page.setExtraHTTPHeaders({
-        'X-Prerender-Request': '1',
-    });
     await page.setCacheEnabled(true);
     await page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
     await page.setDefaultTimeout(RENDER_READY_TIMEOUT_MS);
@@ -176,7 +173,13 @@ async function withPage(task) {
         }
 
         if (requestUrl.startsWith('https://www.ma288.com') || requestUrl.startsWith('https://ma288.com')) {
-            return req.continue({ url: rewriteFrontendUrl(requestUrl) });
+            return req.continue({
+                url: rewriteFrontendUrl(requestUrl),
+                headers: {
+                    ...req.headers(),
+                    'X-Prerender-Request': '1',
+                },
+            });
         }
 
         if (requestUrl.startsWith('https://api.ma288.com')) {
