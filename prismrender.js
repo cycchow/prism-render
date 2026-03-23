@@ -150,6 +150,9 @@ async function withPage(task) {
     const page = await currentBrowser.newPage();
 
     await page.setUserAgent('prerender');
+    await page.setExtraHTTPHeaders({
+        'X-Prerender-Request': '1',
+    });
     await page.setCacheEnabled(true);
     await page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
     await page.setDefaultTimeout(RENDER_READY_TIMEOUT_MS);
