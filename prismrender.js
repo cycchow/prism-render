@@ -61,9 +61,9 @@ function buildReadyCheck(targetUrl) {
     const rules = [];
 
     if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/-999\/-999(?:\/\d{8})?$/.test(pathname)) {
-        rules.push({ selector: 'main aside a[href*="/race-rating/"]', minCount: 5 });
+        rules.push({ selector: 'div.panelHeader', minCount: 1 });
     } else if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/-999\/\d{8}$/.test(pathname)) {
-        rules.push({ selector: 'main aside + aside a[href*="/race-rating/"]', minCount: 3 });
+        rules.push({ selector: 'div.ma288promote', minCount: 1 });
     } else if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/[^/]+\/\d{8}$/.test(pathname)) {
         rules.push({ selector: 'article h1' });
     } else if (/^\/m\/(zh_hk|zh_cn|en)\/oversea-race$/.test(pathname)) {
