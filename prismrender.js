@@ -72,26 +72,7 @@ function buildReadyCheck(targetUrl) {
         selectors.push('div.advanceMemberTitle');
     }
 
-    return () => {
-        const root = document.querySelector('app-root');
-        if (!root) {
-            return false;
-        }
-
-        const rootText = root.innerText.replace(/\s+/g, ' ').trim();
-        if (!rootText) {
-            return false;
-        }
-
-        if (selectors.length === 0) {
-            return true;
-        }
-
-        return selectors.every((selector) => {
-            const element = document.querySelector(selector);
-            return element && element.textContent.replace(/\s+/g, ' ').trim().length > 0;
-        });
-    };
+    return selectors;
 }
 
 async function acquireRenderSlot() {
@@ -231,7 +212,32 @@ async function renderOnce(targetUrl) {
             timeout: NAVIGATION_TIMEOUT_MS,
         });
 
-        await page.waitForFunction(buildReadyCheck(targetUrl), { timeout: RENDER_READY_TIMEOUT_MS });
+        const selectors = buildReadyCheck(targetUrl);
+
+        await page.waitForFunction(
+            (readySelectors) => {
+                const root = document.querySelector('app-root');
+                if (!root) {
+                    return false;
+                }
+
+                const rootText = root.innerText.replace(/\s+/g, ' ').trim();
+                if (!rootText) {
+                    return false;
+                }
+
+                if (!readySelectors || readySelectors.length === 0) {
+                    return true;
+                }
+
+                return readySelectors.every((selector) => {
+                    const element = document.querySelector(selector);
+                    return element && element.textContent.replace(/\s+/g, ' ').trim().length > 0;
+                });
+            },
+            { timeout: RENDER_READY_TIMEOUT_MS },
+            selectors
+        );
 
         return page.content();
     });
