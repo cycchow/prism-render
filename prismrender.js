@@ -58,21 +58,21 @@ function normalizeHtml(targetUrl, html) {
 
 function buildReadyCheck(targetUrl) {
     const pathname = new urlModule.URL(targetUrl).pathname;
-    const selectors = [];
+    const rules = [];
 
     if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/-999\/-999(?:\/\d{8})?$/.test(pathname)) {
-        selectors.push('div.panelHeader');
+        rules.push({ selector: 'main aside a[href*="/race-rating/"]', minCount: 5 });
     } else if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/-999\/\d{8}$/.test(pathname)) {
-        selectors.push('div.ma288promote');
+        rules.push({ selector: 'main aside + aside a[href*="/race-rating/"]', minCount: 3 });
     } else if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/[^/]+\/\d{8}$/.test(pathname)) {
-        selectors.push('h1.horseName');
+        rules.push({ selector: 'article h1' });
     } else if (/^\/m\/(zh_hk|zh_cn|en)\/oversea-race$/.test(pathname)) {
-        selectors.push('ul.oversea-rating-list');
+        rules.push({ selector: 'a[href*="tipsAction_getFormRating"]', minCount: 3 });
     } else if (/^\/register\/(zh_hk|zh_cn|en)\/select-plan$/.test(pathname)) {
-        selectors.push('div.advanceMemberTitle');
+        rules.push({ selector: 'h2', textIncludes: ['我們的服務計劃', '我们的服务计划', 'Our Plans', 'Our Service Plans'] });
     }
 
-    return selectors;
+    return rules;
 }
 
 async function acquireRenderSlot() {
@@ -212,10 +212,10 @@ async function renderOnce(targetUrl) {
             timeout: NAVIGATION_TIMEOUT_MS,
         });
 
-        const selectors = buildReadyCheck(targetUrl);
+        const rules = buildReadyCheck(targetUrl);
 
         await page.waitForFunction(
-            (readySelectors) => {
+            (readyRules) => {
                 const root = document.querySelector('app-root');
                 if (!root) {
                     return false;
@@ -226,17 +226,39 @@ async function renderOnce(targetUrl) {
                     return false;
                 }
 
-                if (!readySelectors || readySelectors.length === 0) {
+                if (!readyRules || readyRules.length === 0) {
                     return true;
                 }
 
-                return readySelectors.every((selector) => {
-                    const element = document.querySelector(selector);
-                    return element && element.textContent.replace(/\s+/g, ' ').trim().length > 0;
+                return readyRules.every((rule) => {
+                    const elements = Array.from(document.querySelectorAll(rule.selector));
+                    if (elements.length === 0) {
+                        return false;
+                    }
+
+                    if (rule.minCount && elements.length < rule.minCount) {
+                        return false;
+                    }
+
+                    const texts = elements
+                        .map((element) => element.textContent.replace(/\s+/g, ' ').trim())
+                        .filter(Boolean);
+
+                    if (texts.length === 0) {
+                        return false;
+                    }
+
+                    if (rule.textIncludes && rule.textIncludes.length > 0) {
+                        return rule.textIncludes.some((expectedText) =>
+                            texts.some((text) => text.includes(expectedText))
+                        );
+                    }
+
+                    return true;
                 });
             },
             { timeout: RENDER_READY_TIMEOUT_MS },
-            selectors
+            rules
         );
 
         return page.content();
