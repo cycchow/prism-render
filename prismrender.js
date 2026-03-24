@@ -15,6 +15,7 @@ let isRestarting = false; // Add a flag to indicate if the browser is restarting
 const maxConcurrentRenders = Number(process.env.MAX_CONCURRENT_RENDERS || 1);
 let activeRenders = 0;
 const renderQueue = [];
+const earliestSupportedRaceDate = Number(process.env.EARLIEST_SUPPORTED_RACE_DATE || 20180901);
 
 function buildReadyRules(targetUrl) {
     const pathname = new urlModule.URL(targetUrl).pathname;
@@ -43,6 +44,20 @@ function buildReadyRules(targetUrl) {
     }
 
     return [];
+}
+
+function isUnsupportedHistoricalRaceUrl(targetUrl) {
+    const pathname = new urlModule.URL(targetUrl).pathname;
+    const match = pathname.match(/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/[^/]+\/(\d{8})$/)
+        || pathname.match(/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/-999\/(\d{8})$/)
+        || pathname.match(/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/-999\/-999\/(\d{8})$/);
+
+    if (!match) {
+        return false;
+    }
+
+    const raceDate = Number(match[2]);
+    return Number.isFinite(raceDate) && raceDate < earliestSupportedRaceDate;
 }
 
 async function launchBrowser() {
@@ -385,6 +400,11 @@ app.get('/render', async (req, res) => {
     try {
         const parsedUrl = new urlModule.URL(requestedUrl);
         console.log('Parsed URL:', parsedUrl.href);
+
+        if (isUnsupportedHistoricalRaceUrl(parsedUrl.href)) {
+            console.log(`Skipping unsupported historical race date for ${parsedUrl.href}`);
+            return res.status(404).send('Race data not available');
+        }
 
         const prerenderedHtml = await prerender(requestedUrl);
 
