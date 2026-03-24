@@ -15,6 +15,35 @@ let prerenderCount = 0;
 let isRestarting = false; // Add a flag to indicate if the browser is restarting
 let cleanupRunning = false; // Flag to prevent concurrent cleanup
 
+function buildReadyRules(targetUrl) {
+    const pathname = new urlModule.URL(targetUrl).pathname;
+
+    if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/-999\/-999(?:\/\d{8})?$/.test(pathname)) {
+        return [{ selector: 'div.panelHeader' }];
+    }
+
+    if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/-999\/\d{8}$/.test(pathname)) {
+        return [{ selector: 'div.ma288promote' }];
+    }
+
+    if (/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/[^/]+\/\d{8}$/.test(pathname)) {
+        return [{ selector: 'article h1' }];
+    }
+
+    if (/^\/m\/(zh_hk|zh_cn|en)\/oversea-race$/.test(pathname)) {
+        return [{ selector: 'a[href*="tipsAction_getFormRating"]', minCount: 1 }];
+    }
+
+    if (/^\/register\/(zh_hk|zh_cn|en)\/select-plan$/.test(pathname)) {
+        return [{
+            selector: 'h2',
+            textIncludes: ['我們的服務計劃', '我们的服务计划', 'Our Plans', 'Our Service Plans'],
+        }];
+    }
+
+    return [];
+}
+
 async function launchBrowser() {
     if (!browser && !isRestarting) {
         isRestarting = true; // Set the flag to true before launching
@@ -47,6 +76,12 @@ async function launchBrowser() {
         }
     }
     return browser;
+}
+
+function cleanupPrerenderedHtml(html) {
+    return html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/gi, '');
 }
 
 async function prerender(targetUrl, retryCount = 0) {
@@ -89,8 +124,37 @@ async function prerender(targetUrl, retryCount = 0) {
         }
 
         const page = await browser.newPage();
-        page.userAgent = 'prerender'
         try {
+            page.on('pageerror', (error) => {
+                console.error('[browser:PAGEERROR]', error);
+            });
+
+            page.on('console', (message) => {
+                const text = message.text();
+                if (
+                    message.type() === 'error' &&
+                    text !== 'Failed to load resource: net::ERR_FAILED'
+                ) {
+                    console.error(`[browser:ERROR] ${text}`);
+                }
+            });
+
+            page.on('requestfailed', (req) => {
+                if (req.url().includes('api.ma288.com')) {
+                    const failure = req.failure();
+                    console.error(
+                        `[browser:REQUESTFAILED] ${req.method()} ${req.url()} ${failure ? failure.errorText : 'unknown error'}`
+                    );
+                }
+            });
+
+            page.on('response', (response) => {
+                const requestUrl = response.url();
+                if (requestUrl.includes('api.ma288.com') && response.status() >= 400) {
+                    console.error(`[browser:HTTP${response.status()}] ${response.request().method()} ${requestUrl}`);
+                }
+            });
+
             // Enable caching
             await page.setCacheEnabled(true);
 
@@ -160,9 +224,40 @@ async function prerender(targetUrl, retryCount = 0) {
             });
             
             // Wait until Angular has rendered something meaningful
+            const readyRules = buildReadyRules(targetUrl);
             await page.waitForFunction(
-                () => document.querySelector('app-root') && document.querySelector('app-root').innerText.trim().length > 0,
-                { timeout: 60000 }
+                (rules) => {
+                    const root = document.querySelector('app-root');
+                    if (!root || root.innerText.trim().length === 0) {
+                        return false;
+                    }
+
+                    if (!rules || rules.length === 0) {
+                        return true;
+                    }
+
+                    return rules.every((rule) => {
+                        const elements = Array.from(document.querySelectorAll(rule.selector));
+                        if (elements.length === 0) {
+                            return false;
+                        }
+
+                        if (rule.minCount && elements.length < rule.minCount) {
+                            return false;
+                        }
+
+                        if (rule.textIncludes && rule.textIncludes.length > 0) {
+                            return elements.some((element) => {
+                                const text = element.textContent.trim();
+                                return rule.textIncludes.some((expected) => text.includes(expected));
+                            });
+                        }
+
+                        return elements.some((element) => element.textContent.trim().length > 0);
+                    });
+                },
+                { timeout: 60000 },
+                readyRules
             );
 
             let html = await page.content();
@@ -176,6 +271,7 @@ async function prerender(targetUrl, retryCount = 0) {
             const baseUrl = `${protocol}//${host}`;
             html = html.replace(/(href|src)="\/([^"]*)"/g, `$1="${baseUrl}/$2"`);
             html = html.replace(/(href|src)="http:\/\/localhost:\d+\/([^"]*)"/g, `$1="${baseUrl}/$2"`);
+            html = cleanupPrerenderedHtml(html);
 
             prerenderCount++; // Increment the prerender count
             return html;
@@ -295,6 +391,13 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
+app.get('/health', (_req, res) => {
+    res.status(200).json({
+        ok: true,
+        browserConnected: Boolean(browser && browser.isConnected && browser.isConnected()),
+    });
+});
+
 app.get('/render', async (req, res) => {
     console.log('Received request for prerendering:', req.query.url);
 
@@ -339,3 +442,18 @@ const server = app.listen(port, () => {
 
 // Increase the server timeout to handle long prerendering tasks
 server.timeout = 120000; // 2 minutes
+
+async function shutdown(signal) {
+    console.log(`Received ${signal}, shutting down...`);
+    server.close(async () => {
+        await closeBrowser();
+        process.exit(0);
+    });
+
+    setTimeout(() => {
+        process.exit(1);
+    }, 15000).unref();
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
