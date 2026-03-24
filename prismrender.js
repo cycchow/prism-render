@@ -438,6 +438,9 @@ app.use('*', proxyMiddleware);
 
 const server = app.listen(port, () => {
     console.log(`Prerender proxy server listening at http://localhost:${port}`);
+    launchBrowser().catch((error) => {
+        console.error('Browser prelaunch failed:', error);
+    });
 });
 
 // Increase the server timeout to handle long prerendering tasks
