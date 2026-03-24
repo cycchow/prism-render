@@ -14,6 +14,9 @@ let browserRestartInterval = 60; // Restart browser every 60 requests
 let prerenderCount = 0;
 let isRestarting = false; // Add a flag to indicate if the browser is restarting
 let cleanupRunning = false; // Flag to prevent concurrent cleanup
+const maxConcurrentRenders = Number(process.env.MAX_CONCURRENT_RENDERS || 1);
+let activeRenders = 0;
+const renderQueue = [];
 
 function buildReadyRules(targetUrl) {
     const pathname = new urlModule.URL(targetUrl).pathname;
@@ -84,7 +87,26 @@ function cleanupPrerenderedHtml(html) {
         .replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/gi, '');
 }
 
+async function acquireRenderSlot() {
+    if (activeRenders < maxConcurrentRenders) {
+        activeRenders += 1;
+        return;
+    }
+
+    await new Promise((resolve) => renderQueue.push(resolve));
+    activeRenders += 1;
+}
+
+function releaseRenderSlot() {
+    activeRenders = Math.max(0, activeRenders - 1);
+    const next = renderQueue.shift();
+    if (next) {
+        next();
+    }
+}
+
 async function prerender(targetUrl, retryCount = 0) {
+    await acquireRenderSlot();
     try {
         // Determine whether to rewrite URLs internally (for in-cluster rendering)
 
@@ -289,6 +311,8 @@ async function prerender(targetUrl, retryCount = 0) {
             console.error(`Max retries reached for ${targetUrl}.`);
             return null;
         }
+    } finally {
+        releaseRenderSlot();
     }
 }
 
@@ -395,6 +419,9 @@ app.get('/health', (_req, res) => {
     res.status(200).json({
         ok: true,
         browserConnected: Boolean(browser && browser.isConnected && browser.isConnected()),
+        activeRenders,
+        queuedRenders: renderQueue.length,
+        maxConcurrentRenders,
     });
 });
 
