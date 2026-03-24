@@ -2,7 +2,6 @@ const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const puppeteer = require('puppeteer');
 const urlModule = require('url');
-const { spawn } = require('child_process'); // Import spawn to handle zombie processes
 
 const app = express();
 const port = process.env.SERVER_PORT || 3000;
@@ -10,10 +9,9 @@ const angularAppPort = 4200;
 const isInternal = process.env.PRERENDER_INTERNAL === "true";
 
 let browser; // Reuse a single browser instance
-let browserRestartInterval = 60; // Restart browser every 60 requests
+let browserRestartInterval = Number(process.env.BROWSER_RESTART_INTERVAL || 200);
 let prerenderCount = 0;
 let isRestarting = false; // Add a flag to indicate if the browser is restarting
-let cleanupRunning = false; // Flag to prevent concurrent cleanup
 const maxConcurrentRenders = Number(process.env.MAX_CONCURRENT_RENDERS || 1);
 let activeRenders = 0;
 const renderQueue = [];
@@ -222,7 +220,7 @@ async function prerender(targetUrl, retryCount = 0) {
                     return req.continue(); // ALWAYS allow JS bundles (critical for Angular)
                 }
 
-                if (["image", "font"].includes(resourceType)) {
+                if (["image", "font", "media", "manifest"].includes(resourceType)) {
                     return req.abort();
                 }
 
@@ -353,62 +351,11 @@ async function closeBrowser() {
         } finally {
             browser = null; // Ensure browser is nullified after closing
             console.log('Browser set to null.'); // Log nullification
-            await cleanupZombieProcesses(); // Clean up zombie processes after closing
         }
     } else {
         console.log('Browser is already null, no need to close.');
     }
 }
-
-// Function to clean up zombie processes using Node.js process management
-async function cleanupZombieProcesses() {
-    if (cleanupRunning) {
-        console.log('Cleanup already running, skipping...');
-        return;
-    }
-
-    cleanupRunning = true;
-    try {
-        console.log('Cleaning up zombie processes...');
-        const child = spawn('ps', ['-eo', 'pid,s,comm']); // Include state (s) in the output
-        let output = '';
-
-        child.stdout.on('data', (data) => {
-            output += data.toString();
-        });
-
-        child.on('close', () => {
-            const lines = output.split('\n');
-            const zombieProcesses = lines.filter((line) => line.includes(' Z ') && line.includes('chrome')); // Look for ' Z ' state
-            zombieProcesses.forEach((line) => {
-                const parts = line.trim().split(/\s+/); // Split by any number of spaces
-                const pid = parts[0];
-                const state = parts[1];
-                const command = parts.slice(2).join(' ');
-
-                if (pid && state === 'Z') {
-                    try {
-                        console.log(`Attempting to kill zombie process with PID: ${pid}, Command: ${command}`);
-                        process.kill(pid, 'SIGKILL'); // Kill the zombie process
-                        console.log(`Killed zombie process with PID: ${pid}, Command: ${command}`);
-                    } catch (error) {
-                        console.error(`Failed to kill zombie process with PID: ${pid}, Command: ${command}`, error);
-                    }
-                }
-            });
-            cleanupRunning = false;
-        });
-    } catch (error) {
-        console.error('Error cleaning up zombie processes:', error);
-        cleanupRunning = false;
-    }
-}
-
-// Periodic cleanup of zombie processes
-setInterval(async () => {
-    console.log('Running periodic cleanup of zombie processes...');
-    await cleanupZombieProcesses();
-}, 60000); // Run cleanup every 60 seconds
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
