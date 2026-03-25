@@ -109,7 +109,7 @@ async function launchBrowser() {
 
 function cleanupPrerenderedHtml(html) {
     return html
-        .replace(/<script\b[^>]*src="[^"]*(?:^|\/)(?:runtime|polyfills|main|scripts|styles)[^"]*"[^>]*><\/script>/gi, '')
+        .replace(/<script\b[^>]*src="(?:[^"]*\/)?(?:runtime|polyfills|main|scripts|styles)[^"]*"[^>]*><\/script>/gi, '')
         .replace(/<script\b(?![^>]*src=)[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
         .replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/gi, '');
 }
