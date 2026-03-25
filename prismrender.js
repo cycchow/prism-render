@@ -60,6 +60,19 @@ function isUnsupportedHistoricalRaceUrl(targetUrl) {
     return Number.isFinite(raceDate) && raceDate < earliestSupportedRaceDate;
 }
 
+function hasInvalidRaceDateFormat(targetUrl) {
+    const pathname = new urlModule.URL(targetUrl).pathname;
+    const match = pathname.match(/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/[^/]+\/([^/]+)$/)
+        || pathname.match(/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/[^/]+\/-999\/([^/]+)$/)
+        || pathname.match(/^\/m\/(zh_hk|zh_cn|en)\/race-rating\/-999\/-999\/([^/]+)$/);
+
+    if (!match) {
+        return false;
+    }
+
+    return !/^\d{8}$/.test(match[2]);
+}
+
 async function launchBrowser() {
     if (!browser && !isRestarting) {
         isRestarting = true; // Set the flag to true before launching
@@ -96,7 +109,8 @@ async function launchBrowser() {
 
 function cleanupPrerenderedHtml(html) {
     return html
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<script\b[^>]*src="[^"]*(?:^|\/)(?:runtime|polyfills|main|scripts|styles)[^"]*"[^>]*><\/script>/gi, '')
+        .replace(/<script\b(?![^>]*src=)[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
         .replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/gi, '');
 }
 
@@ -403,7 +417,12 @@ app.get('/render', async (req, res) => {
 
         if (isUnsupportedHistoricalRaceUrl(parsedUrl.href)) {
             console.log(`Skipping unsupported historical race date for ${parsedUrl.href}`);
-            return res.status(404).send('Race data not available');
+            return res.status(410).send('Race data not available');
+        }
+
+        if (hasInvalidRaceDateFormat(parsedUrl.href)) {
+            console.log(`Skipping invalid race date format for ${parsedUrl.href}`);
+            return res.status(410).send('Race data not available');
         }
 
         const prerenderedHtml = await prerender(requestedUrl);
